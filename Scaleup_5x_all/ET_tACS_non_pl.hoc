@@ -1,0 +1,192 @@
+/* Author: Xu Zhang @UConn, Jan., 2020
+This script implements non-phase-locked tACS for essential tremor.
+*/
+
+load_file("nrngui.hoc")
+
+load_file("rngRead_non_pl.hoc") // Load rng seeds
+noiseSwitch=1
+
+// Loading individual cells
+load_file("cell_ION.hoc")
+load_file("cell_PC.hoc")
+load_file("cell_DCN.hoc")
+load_file("cell_TC.hoc")
+load_file("cell_MC.hoc")
+
+// Loading synaptic connections
+load_file("syn_ION_PC.hoc")
+load_file("syn_PC_DCN.hoc")
+load_file("syn_DCN_ION.hoc")
+load_file("syn_DCN_TC.hoc")
+load_file("syn_TC_MC.hoc")
+load_file("syn_MC_GrL.hoc")
+load_file("syn_GrL_PC.hoc")
+
+// One typical ET condition (tau = 12, R = 0.7)
+PCDCNtaurnd = 682
+PCDCNgrnd = 198
+objref rngPCDCNtau, PCDCNg
+rngPCDCNtau = new Random(PCDCNtaurnd)
+rngPCDCNtau.normal(12,4)
+PCDCNg = new Random(PCDCNgrnd)
+PCDCNg.normal(0.7,0.0196)
+for i = 0,999 {
+	PC2DCN_syn[i].tau = rngPCDCNtau.repick()
+	PC2DCN_syn[i].g = PC2DCN_syn[i].g*PCDCNg.repick()
+}
+
+// Push ION into oscillations; trigger tremor onset
+objref stimION[200]
+for i = 0,199 {
+	IONcell[i] stimION[i] = new IClamp(0.5)
+	stimION[i].amp = 1e-2
+	stimION[i].del = 1000
+	stimION[i].dur = 20
+}
+
+access DCNcell
+
+objref f_trialname
+f_trialname = new File()
+f_trialname.ropen("trialname_non_pl.txt")
+strdef f_PCap, f_DCN, f_Vim, f_ION
+strdef f_sin
+f_trialname.scanstr(f_PCap)
+f_trialname.scanstr(f_DCN)
+f_trialname.scanstr(f_Vim)
+f_trialname.scanstr(f_ION)
+f_trialname.scanstr(f_sin)
+f_trialname.close()
+
+objref f_sinparams
+f_sinparams = new File()
+f_sinparams.ropen("sinparams_non_pl.txt")
+ampparam = f_sinparams.scanvar()
+f_sinparams.close()
+
+objref sinuStim_group[1000]
+for i = 0,999 {
+PCcell[i] sinuStim_group[i] = new SinClamp(0.3)
+sinuStim_group[i].phase = 0 // 7/4*PI
+sinuStim_group[i].pkamp = ampparam // 15e-2
+sinuStim_group[i].freq = 7
+sinuStim_group[i].del = 0
+sinuStim_group[i].dur = 1e5
+}
+
+// Record PC
+objref apc_PC[1000], apPC[1000]
+for i = 0,999 {
+PCcell[i] apc_PC[i] = new APCount(0.5)
+apc_PC[i].thresh = -45
+apPC[i] = new Vector()
+apc_PC[i].record(apPC[i])
+}
+
+// Record DCN
+objref apc_DCN[25], apDCN[25]
+for i = 0,24 {
+	DCNcell[i] apc_DCN[i] = new APCount(0.5)
+	apc_DCN[i].thresh = -45
+	apDCN[i] = new Vector()
+	apc_DCN[i].record(apDCN[i])
+}
+
+// Record Vim
+objref apc_Vim[25], apVim[25]
+for i = 0,24 {
+	TCcell[i] apc_Vim[i] = new APCount(0.5)
+	apc_Vim[i].thresh = -45
+	apVim[i] = new Vector()
+	apc_Vim[i].record(apVim[i])
+}
+
+// Record ION
+objref apc_ION[200], apION[200]
+for i = 0,199 {
+IONcell[i] apc_ION[i] = new APCount(0.5)
+apc_ION[i].thresh = -45
+apION[i] = new Vector()
+apc_ION[i].record(apION[i])
+}
+
+// Record SIN
+objref rec_sinuStim
+rec_sinuStim = new Vector()
+rec_sinuStim.record(&sinuStim_group[0].i)
+
+//////////////////////////////////////////////////////////////////
+// Simulation starts											//
+//																//
+// Set up synaptic transmission delays between PC-DCN and PC-NO	//
+v_init = -57
+dt = 0.0125
+tstop = 10000
+init()
+run()
+																//
+// run()															//
+//																//
+//////////////////////////////////////////////////////////////////
+
+// Save PC
+objref rec_PC
+rec_PC = new File()
+rec_PC.wopen(f_PCap)
+for i = 0,999 {
+    if (apPC[i].size()>0) {
+        for j = 0,apPC[i].size()-1 {
+            rec_PC.printf("%d,%f\n",i,apPC[i].x[j])
+	}
+    }
+}
+rec_PC.close()
+
+// Save DCN
+objref rec_DCN
+rec_DCN = new File()
+rec_DCN.wopen(f_DCN)
+for i = 0,24 {
+    if (apDCN[i].size()>0) {
+        for j = 0,apDCN[i].size()-1 {
+            rec_DCN.printf("%d,%f\n",i,apDCN[i].x[j])
+        }
+    }
+}
+rec_DCN.close()
+
+// Save Vim
+objref rec_Vim
+rec_Vim = new File()
+rec_Vim.wopen(f_Vim)
+for i = 0,24 {
+    if (apVim[i].size()>0) {
+        for j = 0,apVim[i].size()-1 {
+            rec_Vim.printf("%d,%f\n",i,apVim[i].x[j])
+        }
+    }
+}
+rec_Vim.close()
+
+// Save ION
+objref rec_ION
+rec_ION = new File()
+rec_ION.wopen(f_ION)
+for i = 0,199 {
+    if (apION[i].size()>0) {
+        for j = 0,apION[i].size()-1 {
+            rec_ION.printf("%d,%f\n",i,apION[i].x[j])
+        }
+    }
+}
+rec_ION.close()
+
+// Save SIN
+objref sav_sinuStim
+sav_sinuStim = new File()
+sav_sinuStim.wopen(f_sin)
+rec_sinuStim.printf(sav_sinuStim)
+sav_sinuStim.close()
+
+quit()
